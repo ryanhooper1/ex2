@@ -1,0 +1,2 @@
+80 /usr/bin/inetutils-telnet
+80 /usr/bin/wget
