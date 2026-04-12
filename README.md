@@ -90,4 +90,5 @@ the error message -EAGAIN.
 You need to ensure that you handle concurrency in the kernel correctly.
 In particular, any number of outgoing connections may be started at any time,
 hence several instances of the procedures handling the packets may be executed
-at the same time. It is very important that you maximize the degree of parallelism. In p
+at the same time. It is very important that you maximize the degree of parallelism. In particular, your critical sections should take as little execution time
+as possible.
