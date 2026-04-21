@@ -160,7 +160,7 @@ static int is_allowed(int port)
 #error "Kernel version < 4.4 not supported!"
 #endif
 
-unsigned int FirewallExtensionHook(void *priv,
+static unsigned int FirewallExtensionHook(void *priv,
                                    struct sk_buff *skb,
                                    const struct nf_hook_state *state)
 {
@@ -304,8 +304,12 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf,
     char *line_end;
 
     /* Temporary rule set built during parsing — only swapped in on success */
-    struct firewall_rule new_rules[MAX_RULES];
-    int new_num = 0;
+    struct firewall_rule *new_rules;
+    new_rules = kmalloc(MAX_RULES * sizeof(struct firewall_rule), GFP_KERNEL);
+    if (!new_rules) {
+        kfree(kbuf);
+        return -ENOMEM;
+    }    int new_num = 0;
 
     int port;
     char prog[MAX_PATH_LEN];
@@ -315,16 +319,20 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf,
     /* Sanity-check the write size */
     if (count == 0 || count > MAX_WRITE_BUF) {
         printk(KERN_INFO "firewall: proc write size %zu out of range\n", count);
+        kfree(new_rules);
         return -EINVAL;
     }
 
     /* Allocate a kernel buffer and copy from user space */
     kbuf = kmalloc(count + 1, GFP_KERNEL);
-    if (!kbuf)
+    if (!kbuf){
+        kfree(new_rules);
         return -ENOMEM;
+    }
 
     if (copy_from_user(kbuf, ubuf, count)) {
         kfree(kbuf);
+        kfree(new_rules);
         return -EFAULT;
     }
     kbuf[count] = '\0'; /* Null-terminate so we can use string functions */
@@ -341,6 +349,7 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf,
             printk(KERN_INFO "firewall: no rules configured\n");
         read_unlock(&rules_lock);
         kfree(kbuf);
+        kfree(new_rules);
         return count;
     }
 
@@ -405,10 +414,12 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf,
     } else {
         printk(KERN_INFO "firewall: parse error — old rules retained\n");
         kfree(kbuf);
+        kfree(new_rules);
         return -EINVAL;
     }
 
     kfree(kbuf);
+    kfree(new_rules);
     return count;
 }
 
