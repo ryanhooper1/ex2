@@ -305,11 +305,11 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf,
 
     /* Temporary rule set built during parsing — only swapped in on success */
     struct firewall_rule *new_rules;
+    int new_num = 0;
     new_rules = kmalloc(MAX_RULES * sizeof(struct firewall_rule), GFP_KERNEL);
     if (!new_rules) {
-        kfree(kbuf);
         return -ENOMEM;
-    }    int new_num = 0;
+    }
 
     int port;
     char prog[MAX_PATH_LEN];
@@ -338,7 +338,7 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf,
     kbuf[count] = '\0'; /* Null-terminate so we can use string functions */
 
     /* --- Handle the LIST command --- */
-    if (strncmp(kbuf, "LIST", 4) == 0) {
+    if (strcmp(kbuf, "LIST\n") == 0 || strcmp(kbuf, "LIST") == 0) {
         printk(KERN_INFO "firewall: listing rules\n");
         read_lock(&rules_lock);
         for (i = 0; i < num_rules; i++) {
