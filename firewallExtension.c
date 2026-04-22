@@ -1,14 +1,3 @@
-/*
- * A Linux kernel module that extends the firewall to restrict which programs
- * are allowed to make outgoing TCP connections on a given port.
- *
- * How it works:
- *   - Rules are stored as (port, program_path) pairs.
- *   - If no rules exist for a port, ALL programs may connect on that port.
- *   - If rules exist for a port, only listed programs may connect.
- *   - Rules are configured from user space via /proc/firewallExtension.
- */
-
 #include <linux/module.h>          
 #include <linux/kernel.h>          
 #include <linux/netfilter.h>       
@@ -36,7 +25,7 @@
 // Module metadata
 
 MODULE_AUTHOR("Ryan Hooper");
-MODULE_DESCRIPTION("Firewall extension: per-program port control");
+MODULE_DESCRIPTION("Firewall extension");
 MODULE_LICENSE("GPL");
 
 //Rule storage
@@ -129,7 +118,7 @@ static unsigned int FirewallExtensionHook(void *priv, struct sk_buff *skb, const
         printk(KERN_INFO "firewall: packet with no socket, accepting\n");
         return NF_ACCEPT;
     }
-    // Check if it's IPv4 or IPv6 and if it's TCP. If not TCP, accept the packet.
+    // Check if it's IPv4 or IPv6 and if TCP. If not TCP, accept packet
     if (sk->sk_family == AF_INET6) {
         ip6 = ipv6_hdr(skb);
         if (!ip6) {
@@ -168,14 +157,11 @@ static unsigned int FirewallExtensionHook(void *priv, struct sk_buff *skb, const
         return NF_ACCEPT;
     }
     mmput(mm); 
-    // Get the destination port in host byte order
     port = ntohs(tcp->dest);
     printk(KERN_INFO "firewall: SYN on port %d from pid %d\n",
            port, current->pid);
-    // Check if this port is allowed for the current process
     read_lock(&rules_lock);
     if (!is_allowed(port)) {
-        // Port is blocked for this process. Drop the packet.
         read_unlock(&rules_lock);
         printk(KERN_INFO "firewall: BLOCKING connection on port %d\n", port);
         tcp_done(sk); 
@@ -186,7 +172,6 @@ static unsigned int FirewallExtensionHook(void *priv, struct sk_buff *skb, const
     return NF_ACCEPT;
 }
 
-//proc_ops for /proc/firewallExtension 
 
 //Open
 static int fw_proc_open(struct inode *inode, struct file *file)
@@ -204,7 +189,7 @@ static int fw_proc_release(struct inode *inode, struct file *file)
     atomic_set(&proc_in_use, 0);
     return 0;
 }
-//  Write: handle LIST and W commands from user space
+//  Write: for list and W command
 static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos)
 {
     char *kbuf;
@@ -229,7 +214,6 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
         kfree(new_rules);
         return -EINVAL;
     }
-    // Copy the user buffer into kernel space and null-terminate it
     kbuf = kmalloc(count + 1, GFP_KERNEL);
     if (!kbuf){
         kfree(new_rules);
@@ -258,7 +242,7 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
         return count;
     }
 
-    // Parse the buffer line by line, validating each rule
+    // Parsing
     cursor = kbuf;
 
     while (*cursor != '\0' && parse_ok) {
@@ -298,7 +282,7 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
         new_rules[new_num].program[MAX_PATH_LEN - 1] = '\0';
         new_num++;
     }
-    // If all rules are valid, replace the old rules atomically. Otherwise, discard the new rules and keep the old ones.
+
     if (parse_ok) {
         write_lock(&rules_lock);
         memcpy(rules, new_rules, new_num * sizeof(struct firewall_rule));

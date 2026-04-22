@@ -1,16 +1,3 @@
-/*
- * A user-space program for configuring the firewall kernel module.
- * Communicates with the kernel via /proc/firewallExtension.
- *
- * Usage:
- *   ./firewallSetup L
- *       Tells the kernel module to print all current rules to /var/log/kern.log
- *   ./firewallSetup W <filename>
- *       Reads firewall rules from <filename> (one "port /path" rule per line)
- *       and sends them to the kernel module, replacing the existing rule set.
- *       Each path is validated as an existing executable before sending.
- */
-
 #include <stdio.h>    
 #include <stdlib.h>   
 #include <string.h>   
@@ -18,18 +5,19 @@
 #include <fcntl.h>    
 #include <errno.h>    
 
+//Constants
 #define PROC_PATH    "/proc/firewallExtension"
 #define MAX_PATH_LEN 256
 #define MAX_LINE_LEN 300   
 #define MAX_RULES    64
 
-// Structure to hold a firewall rule in user space
+//Rule structure
 struct rule {
     int  port;
     char program[MAX_PATH_LEN];
 };
 
-// Helper function to handle the "LIST" command
+// Helper function
 static void cmd_list(void)
 {
     int fd;
@@ -55,7 +43,7 @@ static void cmd_list(void)
     printf("Rules listed in /var/log/kern.log\n");
 }
 
-// Helper function to handle the "W" command
+// Helper function 
 static void cmd_write(const char *filename)
 {
     FILE *fp;
@@ -65,7 +53,6 @@ static void cmd_write(const char *filename)
     struct rule rules[MAX_RULES];
     int    num_rules = 0;
 
-    /* Buffer we will write to the kernel — build it up as we parse */
     char   send_buf[MAX_RULES * (MAX_PATH_LEN + 16)];
     int    send_len = 0;
 
@@ -75,7 +62,6 @@ static void cmd_write(const char *filename)
     int  fd;
     ssize_t written;
 
-    // Open and parse the rules file
     fp = fopen(filename, "r");
     if (!fp) {
         fprintf(stderr, "Error: could not open rules file '%s': %s\n",
@@ -83,7 +69,7 @@ static void cmd_write(const char *filename)
         exit(1);
     }
 
-    // Parse the file line by line
+    //Parse
     while (fgets(line, sizeof(line), fp) != NULL) {
         line_number++;
 
@@ -139,7 +125,7 @@ static void cmd_write(const char *filename)
 
     fclose(fp);
 
-    // Build the buffer to send to the kernel
+    //Build the buffer
     send_len = 0;
     for (int i = 0; i < num_rules; i++) {
         int n = snprintf(send_buf + send_len,
@@ -154,7 +140,7 @@ static void cmd_write(const char *filename)
         send_len += n;
     }
 
-    // Send the buffer to the kernel via /proc
+    // Send the buffer to the kernel 
     fd = open(PROC_PATH, O_WRONLY);
     if (fd < 0) {
         fprintf(stderr, "Error: could not open %s: %s\n",
@@ -177,23 +163,25 @@ static void cmd_write(const char *filename)
 }
 
 
+
 int main(int argc, char *argv[])
 {
+
     if (argc < 2) {
         fprintf(stderr, "Usage:\n");
         fprintf(stderr, "  %s L              (list rules in kern.log)\n", argv[0]);
         fprintf(stderr, "  %s W <filename>   (load rules from file)\n",   argv[0]);
         return 1;
     }
-
+    
     if (strcmp(argv[1], "L") == 0) {
-        /* List command — no other arguments needed */
         if (argc != 2) {
             fprintf(stderr, "Usage: %s L\n", argv[0]);
             return 1;
         }
         cmd_list();
     }
+    
     else if (strcmp(argv[1], "W") == 0) {
         if (argc != 3) {
             fprintf(stderr, "Usage: %s W <filename>\n", argv[0]);
@@ -201,6 +189,7 @@ int main(int argc, char *argv[])
         }
         cmd_write(argv[2]);
     }
+    
     else {
         fprintf(stderr, "Unknown command '%s'. Use L or W.\n", argv[1]);
         return 1;
