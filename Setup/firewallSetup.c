@@ -16,7 +16,7 @@
 #include <string.h>   
 #include <unistd.h>   
 #include <fcntl.h>    
-#include <errno.h>    /
+#include <errno.h>    
 
 #define PROC_PATH    "/proc/firewallExtension"
 #define MAX_PATH_LEN 256
