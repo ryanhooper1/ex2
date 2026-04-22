@@ -33,6 +33,12 @@
 #define MAX_WRITE_BUF   (MAX_RULES * (MAX_PATH_LEN + 16))  
 #define PROC_FILENAME   "firewallExtension"
 
+// Module metadata
+
+MODULE_AUTHOR("Ryan Hooper");
+MODULE_DESCRIPTION("Firewall extension: per-program port control");
+MODULE_LICENSE("GPL");
+
 //Rule storage
 struct firewall_rule {
     int  port;                  
