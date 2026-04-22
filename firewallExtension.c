@@ -237,6 +237,8 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
     }
 
     if (copy_from_user(kbuf, ubuf, count)) {
+        kfree(kbuf);
+        kfree(new_rules);
         return -EFAULT;
     }
     kbuf[count] = '\0'; 
