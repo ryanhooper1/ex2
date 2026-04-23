@@ -48,7 +48,6 @@ static void cmd_write(const char *filename)
 {
     FILE *fp;
     char  line[MAX_LINE_LEN];
-    int   line_number = 0;
 
     struct rule rules[MAX_RULES];
     int    num_rules = 0;
@@ -71,7 +70,6 @@ static void cmd_write(const char *filename)
 
     //Parse
     while (fgets(line, sizeof(line), fp) != NULL) {
-        line_number++;
 
         size_t len = strlen(line);
         if (len > 0 && line[len - 1] == '\n')
