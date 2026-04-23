@@ -1,66 +1,59 @@
-#include <linux/module.h>          
-#include <linux/kernel.h>          
-#include <linux/netfilter.h>       
-#include <linux/netfilter_ipv4.h>  
-#include <linux/skbuff.h>          
-#include <net/tcp.h>               
-#include <linux/namei.h>           
-#include <linux/version.h>         
-#include <linux/sched/mm.h>        
-#include <linux/proc_fs.h>         
-#include <linux/uaccess.h>         
-#include <linux/slab.h>            
-#include <linux/rwlock.h>          
-#include <linux/atomic.h>          
-#include <linux/dcache.h>         
-#include <linux/string.h>          
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/netfilter.h>
+#include <linux/netfilter_ipv4.h>
+#include <linux/skbuff.h>
+#include <net/tcp.h>
+#include <linux/namei.h>
+#include <linux/version.h>
+#include <linux/sched/mm.h>
+#include <linux/proc_fs.h>
+#include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <linux/rwlock.h>
+#include <linux/atomic.h>
+#include <linux/dcache.h>
+#include <linux/string.h>
 
-// Constants for rule storage and /proc buffer sizes
-
-#define MAX_RULES       64          
-#define MAX_PATH_LEN    256         
-#define MAX_WRITE_BUF   (MAX_RULES * (MAX_PATH_LEN + 16))  
+//Constants
+#define MAX_RULES       64
+#define MAX_PATH_LEN    4096
+#define MAX_WRITE_BUF   (MAX_RULES * (MAX_PATH_LEN + 16))
 #define PROC_FILENAME   "firewallExtension"
 
 // Module metadata
-
 MODULE_AUTHOR("Ryan Hooper");
 MODULE_DESCRIPTION("Firewall extension");
 MODULE_LICENSE("GPL");
 
-//Rule storage
+// Rule storage
 struct firewall_rule {
-    int  port;                  
-    char program[MAX_PATH_LEN]; 
+    int  port;
+    char program[MAX_PATH_LEN];
 };
-
-// Module metadata
 
 static struct firewall_rule rules[MAX_RULES];
 static int                  num_rules = 0;
 
 // Synchronization for rule access
-
 static DEFINE_RWLOCK(rules_lock);
 
 static atomic_t proc_in_use = ATOMIC_INIT(0);
 
 static struct proc_dir_entry *proc_entry;
 
-//Helper function
-
+// Helper
 static int is_allowed(int port)
 {
-    
     int i;
     int rules_exist_for_port = 0;
     struct path  exe_path;
     char        *exe_full_path;
     char         path_buf[MAX_PATH_LEN];
-    char         proc_exe[64];  
+    char         proc_exe[64];
     int          allowed = 0;
 
-   
+    // First pass
     for (i = 0; i < num_rules; i++) {
         if (rules[i].port == port) {
             rules_exist_for_port = 1;
@@ -69,23 +62,24 @@ static int is_allowed(int port)
     }
 
     if (!rules_exist_for_port)
-        return 1; 
-     
+        return 1;
+
     snprintf(proc_exe, sizeof(proc_exe), "/proc/%d/exe", current->pid);
     if (kern_path(proc_exe, LOOKUP_FOLLOW, &exe_path) != 0) {
         printk(KERN_INFO "firewall: Could not resolve exe path for pid %d\n",
                current->pid);
-        return 0; 
+        return 0;
     }
-    
+
     exe_full_path = d_path(&exe_path, path_buf, MAX_PATH_LEN);
-    path_put(&exe_path); 
-    
+    path_put(&exe_path);
+
     if (IS_ERR(exe_full_path)) {
         printk(KERN_INFO "firewall: d_path failed for pid %d\n", current->pid);
-        return 0; 
+        return 0;
     }
-    
+
+    // Second pass
     for (i = 0; i < num_rules; i++) {
         if (rules[i].port == port &&
             strncmp(exe_full_path, rules[i].program, MAX_PATH_LEN) == 0) {
@@ -97,19 +91,17 @@ static int is_allowed(int port)
     return allowed;
 }
 
-// Netfilter hook function and /proc file operations
-
+// Netfilter hook 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(4, 3, 0)
 #error "Kernel version < 4.4 not supported!"
 #endif
 
 static unsigned int FirewallExtensionHook(void *priv, struct sk_buff *skb, const struct nf_hook_state *state)
 {
-    
-    struct tcphdr   *tcp;
-    struct iphdr    *ip;
-    struct ipv6hdr  *ip6;
-    struct sock     *sk;
+    struct tcphdr    *tcp;
+    struct iphdr     *ip;
+    struct ipv6hdr   *ip6;
+    struct sock      *sk;
     struct mm_struct *mm;
     int port;
 
@@ -118,6 +110,7 @@ static unsigned int FirewallExtensionHook(void *priv, struct sk_buff *skb, const
         printk(KERN_INFO "firewall: packet with no socket, accepting\n");
         return NF_ACCEPT;
     }
+
     // Check if it's IPv4 or IPv6 and if TCP. If not TCP, accept packet
     if (sk->sk_family == AF_INET6) {
         ip6 = ipv6_hdr(skb);
@@ -126,7 +119,7 @@ static unsigned int FirewallExtensionHook(void *priv, struct sk_buff *skb, const
             return NF_ACCEPT;
         }
         if (ip6->nexthdr != IPPROTO_TCP)
-            return NF_ACCEPT; 
+            return NF_ACCEPT;
     }
     else if (sk->sk_family == AF_INET) {
         ip = ip_hdr(skb);
@@ -135,62 +128,65 @@ static unsigned int FirewallExtensionHook(void *priv, struct sk_buff *skb, const
             return NF_ACCEPT;
         }
         if (ip->protocol != IPPROTO_TCP)
-            return NF_ACCEPT; 
+            return NF_ACCEPT;
     }
     else {
-        return NF_ACCEPT; 
+        return NF_ACCEPT;
     }
-    
+
     tcp = tcp_hdr(skb);
     if (!tcp) {
         printk(KERN_INFO "firewall: no TCP header, accepting\n");
         return NF_ACCEPT;
     }
 
-
+    // Only check SYN packets — start of a new connection
     if (!tcp->syn)
         return NF_ACCEPT;
 
-    
     if (in_irq() || in_softirq() || !(mm = get_task_mm(current))) {
         printk(KERN_INFO "firewall: not in user context, accepting packet\n");
         return NF_ACCEPT;
     }
-    mmput(mm); 
+    mmput(mm);
+
     port = ntohs(tcp->dest);
     printk(KERN_INFO "firewall: SYN on port %d from pid %d\n",
            port, current->pid);
+
     read_lock(&rules_lock);
     if (!is_allowed(port)) {
         read_unlock(&rules_lock);
         printk(KERN_INFO "firewall: BLOCKING connection on port %d\n", port);
-        tcp_done(sk); 
+        tcp_done(sk);
         return NF_DROP;
     }
     read_unlock(&rules_lock);
+
     printk(KERN_INFO "firewall: ALLOWING connection on port %d\n", port);
     return NF_ACCEPT;
 }
 
-
-//Open
+// /proc open — only one process at a time
 static int fw_proc_open(struct inode *inode, struct file *file)
 {
-    
     if (atomic_cmpxchg(&proc_in_use, 0, 1) != 0) {
         printk(KERN_INFO "firewall: /proc file already open, returning EAGAIN\n");
         return -EAGAIN;
     }
     return 0;
 }
-// Release
+
+// /proc release — always resets the in-use flag
 static int fw_proc_release(struct inode *inode, struct file *file)
 {
     atomic_set(&proc_in_use, 0);
     return 0;
 }
-//  Write: for list and W command
-static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos)
+
+// /proc write — handles LIST command and rule replacement
+static ssize_t fw_proc_write(struct file *file, const char __user *ubuf,
+                             size_t count, loff_t *ppos)
 {
     char *kbuf;
     char *line;
@@ -199,10 +195,10 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
 
     struct firewall_rule *new_rules;
     int new_num = 0;
+
     new_rules = kmalloc(MAX_RULES * sizeof(struct firewall_rule), GFP_KERNEL);
-    if (!new_rules) {
+    if (!new_rules)
         return -ENOMEM;
-    }
 
     int port;
     char prog[MAX_PATH_LEN];
@@ -214,8 +210,9 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
         kfree(new_rules);
         return -EINVAL;
     }
+
     kbuf = kmalloc(count + 1, GFP_KERNEL);
-    if (!kbuf){
+    if (!kbuf) {
         kfree(new_rules);
         return -ENOMEM;
     }
@@ -225,15 +222,15 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
         kfree(new_rules);
         return -EFAULT;
     }
-    kbuf[count] = '\0'; 
+    kbuf[count] = '\0';
 
+    // LIST command
     if (strcmp(kbuf, "LIST\n") == 0 || strcmp(kbuf, "LIST") == 0) {
         printk(KERN_INFO "firewall: listing rules\n");
         read_lock(&rules_lock);
-        for (i = 0; i < num_rules; i++) {
+        for (i = 0; i < num_rules; i++)
             printk(KERN_INFO "Firewall rule: %d %s\n",
                    rules[i].port, rules[i].program);
-        }
         if (num_rules == 0)
             printk(KERN_INFO "firewall: no rules configured\n");
         read_unlock(&rules_lock);
@@ -244,22 +241,21 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
 
     // Parsing
     cursor = kbuf;
-
     while (*cursor != '\0' && parse_ok) {
         line = cursor;
         line_end = strchr(cursor, '\n');
 
         if (line_end != NULL) {
-            *line_end = '\0';      
+            *line_end = '\0';
             cursor = line_end + 1;
         } else {
-            cursor = cursor + strlen(cursor); 
+            cursor = cursor + strlen(cursor);
         }
 
         if (strlen(line) == 0)
             continue;
 
-        if (sscanf(line, "%d %255s", &port, prog) != 2) {
+        if (sscanf(line, "%d %4095s", &port, prog) != 2) {
             printk(KERN_INFO "firewall: malformed rule line: '%s'\n", line);
             parse_ok = 0;
             break;
@@ -283,6 +279,7 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
         new_num++;
     }
 
+    // Atomic replacement
     if (parse_ok) {
         write_lock(&rules_lock);
         memcpy(rules, new_rules, new_num * sizeof(struct firewall_rule));
@@ -290,7 +287,7 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
         write_unlock(&rules_lock);
         printk(KERN_INFO "firewall: %d rule(s) loaded successfully\n", new_num);
     } else {
-        printk(KERN_INFO "firewall: parse error — old rules retained\n");
+        printk(KERN_INFO "firewall: parse error, old rules retained\n");
         kfree(kbuf);
         kfree(new_rules);
         return -EINVAL;
@@ -300,6 +297,7 @@ static ssize_t fw_proc_write(struct file *file, const char __user *ubuf, size_t 
     kfree(new_rules);
     return count;
 }
+
 static const struct proc_ops fw_proc_ops = {
     .proc_open    = fw_proc_open,
     .proc_write   = fw_proc_write,
@@ -313,11 +311,11 @@ static struct nf_hook_ops firewallExtension_ops = {
     .hooknum  = NF_INET_LOCAL_OUT,
 };
 
-// Module initialization and cleanup
-
+// Module init and cleanup
 int init_module(void)
 {
     int err;
+
     proc_entry = proc_create(PROC_FILENAME, 0666, NULL, &fw_proc_ops);
     if (!proc_entry) {
         printk(KERN_INFO "firewall: failed to create /proc/%s\n", PROC_FILENAME);
@@ -331,16 +329,13 @@ int init_module(void)
         return err;
     }
 
-    printk(KERN_INFO "firewall: module loaded, /proc/%s created\n",
-           PROC_FILENAME);
+    printk(KERN_INFO "firewall: module loaded, /proc/%s created\n", PROC_FILENAME);
     return 0;
 }
 
 void cleanup_module(void)
 {
     nf_unregister_net_hook(&init_net, &firewallExtension_ops);
-
     proc_remove(proc_entry);
-
     printk(KERN_INFO "firewall: module unloaded, all extensions removed\n");
 }
